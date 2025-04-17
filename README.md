@@ -76,7 +76,6 @@ go build -o loki-mcp-client ./cmd/client
 
 # Loki query examples:
 ./loki-mcp-client loki_query "{job=\"varlogs\"}"
-./loki-mcp-client loki_query "http://localhost:3100" "{job=\"varlogs\"}"
 ./loki-mcp-client loki_query "{job=\"varlogs\"}" "-1h" "now" 100
 
 # Using environment variable:
@@ -120,9 +119,6 @@ The project includes a complete Docker Compose setup to test Loki queries locall
 
 2. Use the provided test script to query logs:
    ```bash
-   # Make it executable
-   chmod +x test-loki-query.sh
-   
    # Run with default parameters (queries last 15 minutes of logs)
    ./test-loki-query.sh
    
@@ -135,9 +131,6 @@ The project includes a complete Docker Compose setup to test Loki queries locall
 
 3. Insert dummy logs for testing:
    ```bash
-   # Make it executable
-   chmod +x insert-loki-logs.sh
-   
    # Insert 10 dummy logs with default settings
    ./insert-loki-logs.sh
    
