@@ -22,8 +22,8 @@ WORKDIR /app
 # Copy the binary from the builder stage
 COPY --from=builder /app/loki-mcp-server .
 
-# Expose any ports the app uses (optional, as we're using stdin/stdout for MCP)
-# EXPOSE 8080
+# Expose the default port for SSE server
+EXPOSE 8080
 
 # Set the entry point
 ENTRYPOINT ["./loki-mcp-server"]

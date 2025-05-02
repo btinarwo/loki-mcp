@@ -146,6 +146,49 @@ The project includes a complete Docker Compose setup to test Loki queries locall
 
 4. Access the Grafana UI at http://localhost:3000 to explore logs visually.
 
+## Server-Sent Events (SSE) Support
+
+The server now supports two modes of communication:
+1. Standard input/output (stdin/stdout) following the Model Context Protocol (MCP)
+2. HTTP Server with Server-Sent Events (SSE) endpoint for integration with tools like n8n
+
+The default port for the HTTP server is 8080, but can be configured using the `SSE_PORT` environment variable.
+
+### Server Endpoints
+
+When running in HTTP mode, the server exposes the following endpoints:
+
+- SSE Endpoint: `http://localhost:8080/sse` - For real-time event streaming
+- MCP Endpoint: `http://localhost:8080/mcp` - For MCP protocol messaging
+
+### Using Docker with SSE
+
+When running the server with Docker, make sure to expose port 8080:
+
+```bash
+# Build the Docker image
+docker build -t loki-mcp-server .
+
+# Run the server with port mapping
+docker run -p 8080:8080 --rm -i loki-mcp-server
+```
+
+### n8n Integration
+
+You can integrate the Loki MCP Server with n8n workflows:
+
+1. Install the MCP Client Tools node in n8n
+
+2. Configure the node with these parameters:
+   - **SSE Endpoint**: `http://your-server-address:8080/sse` (replace with your actual server address)
+   - **Authentication**: Choose appropriate authentication if needed
+   - **Tools to Include**: Choose which Loki tools to expose to the AI Agent
+
+3. Connect the MCP Client Tool node to an AI Agent node that will use the Loki querying capabilities
+
+Example workflow:
+Trigger → MCP Client Tool (Loki server) → AI Agent (Claude)
+
 ## Architecture
 
 The Loki MCP Server uses a modular architecture:

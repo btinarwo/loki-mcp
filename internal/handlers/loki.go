@@ -34,6 +34,14 @@ type LokiEntry struct {
 	Values [][]string        `json:"values"` // [timestamp, log line]
 }
 
+// SSEEvent represents an event to be sent via SSE
+type SSEEvent struct {
+	Type      string      `json:"type"`
+	Query     string      `json:"query"`
+	Timestamp string      `json:"timestamp"`
+	Results   interface{} `json:"results"`
+}
+
 // Environment variable name for Loki URL
 const EnvLokiURL = "LOKI_URL"
 
@@ -152,7 +160,19 @@ func HandleLokiQuery(ctx context.Context, request mcp.CallToolRequest) (*mcp.Cal
 		return nil, fmt.Errorf("failed to format results: %v", err)
 	}
 
+	// Broadcast results to SSE clients if available
+	broadcastQueryResults(ctx, queryString, result)
+
 	return mcp.NewToolResultText(formattedResult), nil
+}
+
+// broadcastQueryResults sends the query results to all connected SSE clients
+func broadcastQueryResults(ctx context.Context, queryString string, result *LokiResult) {
+	// In the simplified approach, we don't explicitly broadcast events
+	// The SSE server automatically handles tool calls through the MCPServer
+
+	// This function is kept as a placeholder for future enhancements
+	// or if you decide to implement custom broadcasting later
 }
 
 // parseTime parses a time string in various formats
