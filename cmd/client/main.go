@@ -250,18 +250,3 @@ func createLokiQueryRequest(url, query, start, end string, limit float64) Reques
 		},
 	}
 }
-
-func getOperationSymbol(operation string) string {
-	switch operation {
-	case "add":
-		return "+"
-	case "subtract":
-		return "-"
-	case "multiply":
-		return "*"
-	case "divide":
-		return "/"
-	default:
-		return operation
-	}
-}
