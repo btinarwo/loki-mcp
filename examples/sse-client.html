@@ -193,8 +193,8 @@
                                     if (entry.values && entry.values.length > 0) {
                                         entry.values.forEach(val => {
                                             if (val.length >= 2) {
-                                                // Format timestamp
-                                                const timestamp = new Date(parseFloat(val[0]) * 1000).toISOString();
+                                                // Format timestamp - Loki returns nanoseconds, JavaScript Date expects milliseconds
+                                                const timestamp = new Date(parseFloat(val[0]) / 1000000).toISOString();
                                                 logEvent(`[${timestamp}] ${val[1]}`, false, 'log');
                                             }
                                         });
