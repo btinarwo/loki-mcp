@@ -1,5 +1,7 @@
 # Loki MCP Server
 
+[![CI](https://github.com/scottlepp/loki-mcp/workflows/CI/badge.svg)](https://github.com/scottlepp/loki-mcp/actions/workflows/ci.yml)
+
 A Go-based server implementation for the Model Context Protocol (MCP) with Grafana Loki integration.
 
 ## Getting Started
@@ -304,3 +306,34 @@ After adding this configuration, restart Cursor, and you'll be able to use the L
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Running Tests
+
+The project includes comprehensive unit tests and CI/CD workflows to ensure reliability:
+
+```bash
+# Run all tests
+go test ./...
+
+# Run tests with coverage
+go test -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+
+# Run tests with race detection  
+go test -race ./...
+```
+
+### Timestamp Bug Fix (Issue #3)
+
+This project previously had a critical bug where timestamps were displayed as year 2262 instead of correct dates. This has been fixed and regression tests are in place:
+
+- **Root Cause**: Loki returns timestamps in nanoseconds, but the code was incorrectly treating them as seconds and multiplying by 1,000,000,000
+- **Fix**: Correctly handle nanosecond timestamps from Loki  
+- **Testing**: Comprehensive tests ensure timestamps display correctly (e.g., 2024, 2023) instead of 2262
+- **CI Protection**: Automated tests prevent regression of this critical bug
+
+The tests specifically verify:
+- ✅ Timestamps show correct years instead of 2262
+- ✅ Multiple timestamp formats work correctly
+- ✅ Invalid timestamps have proper fallback behavior
+- ✅ Integration with real Loki instances
