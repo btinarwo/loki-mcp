@@ -330,8 +330,8 @@ func formatLokiResults(result *LokiResult) (string, error) {
 				// Parse timestamp
 				ts, err := strconv.ParseFloat(val[0], 64)
 				if err == nil {
-					// Convert to time
-					timestamp := time.Unix(0, int64(ts*1000000000))
+					// Convert to time - Loki returns timestamps in nanoseconds already
+					timestamp := time.Unix(0, int64(ts))
 					output += fmt.Sprintf("[%s] %s\n", timestamp.Format(time.RFC3339), val[1])
 				} else {
 					output += fmt.Sprintf("[%s] %s\n", val[0], val[1])
