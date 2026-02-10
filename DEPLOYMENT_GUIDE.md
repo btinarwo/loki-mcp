@@ -368,10 +368,40 @@ Only `ThinkInAIXYZ/go-mcp` supports these requirements out of the box.
 
 ### Prerequisites
 
-- AWS CLI configured
-- Docker with ARM64 support
-- Container registry (ECR recommended)
-- Existing Loki instance
+Before deploying to AWS Bedrock AgentCore, ensure you have:
+
+**Required Tools:**
+- AWS CLI configured with appropriate credentials
+- Docker with ARM64 support (for building images)
+- Container registry access (AWS ECR recommended)
+- `jq` for JSON processing (optional, for testing)
+
+**AWS Resources:**
+- Existing Loki instance or plan to deploy one
+- VPC with appropriate subnets
+- Security groups configured for network access
+- IAM permissions for Bedrock AgentCore operations
+
+**Network Requirements:**
+- Network connectivity between Bedrock AgentCore and Loki
+- Port 3100 accessible from Bedrock AgentCore to Loki
+- Outbound internet access for container registry (during deployment)
+
+### Network Restrictions & Troubleshooting
+
+**Issue:** Building Docker images in restricted networks (e.g., corporate networks) may fail with:
+```
+go: github.com/ThinkInAIXYZ/go-mcp@v0.2.24: Get "https://proxy.golang.org/...": dial tcp: lookup proxy.golang.org: no such host
+```
+
+**Solution:** This repository includes vendored dependencies. Use `Dockerfile.ecr` which doesn't require network access during build:
+
+```bash
+# Use Dockerfile.ecr with vendored dependencies
+docker build --platform linux/arm64 -f Dockerfile.ecr -t loki-mcp-server:latest .
+```
+
+The vendored dependencies in the `vendor/` directory eliminate the need for `go mod download`, making builds work in restricted networks.
 
 ### Step 1: Build ARM64 Container
 

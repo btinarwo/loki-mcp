@@ -25,6 +25,59 @@ This is a **modified version** of the original [loki-mcp](https://github.com/sco
 | AWS Bedrock AgentCore | ❌ Not supported | ✅ Fully compliant |
 | Platform | Any | ARM64 optimized |
 
+## Quick Start (Local Testing)
+
+Get started in under 5 minutes with a complete local testing environment:
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/btinarwo/loki-mcp.git
+cd loki-mcp
+
+# 2. Start the complete environment (Loki + MCP Server + Grafana)
+docker-compose up -d
+
+# 3. Wait for services to be ready (~30 seconds)
+docker-compose ps
+
+# 4. Test the MCP server - List available tools
+curl -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/list",
+    "params": {}
+  }' | sed 's/^data: //' | jq .
+
+# 5. Query logs from Loki
+curl -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": {
+      "name": "loki_query",
+      "arguments": {
+        "query": "{job=\"varlogs\"}",
+        "limit": 5
+      }
+    }
+  }' | sed 's/^data: //' | jq -r '.result.content[0].text'
+```
+
+**What's Running:**
+- **Loki** (port 3100) - Log aggregation system
+- **MCP Server** (port 8000) - HTTP endpoint at `/mcp`
+- **Grafana** (port 3000) - Log visualization UI
+- **Promtail** - Collects and forwards logs to Loki
+- **Log Generator** - Creates sample logs for testing
+
+**Next Steps:**
+- See [Testing the MCP Server](#testing-the-mcp-server) for more examples
+- See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for AWS Bedrock AgentCore deployment
+
 ## Getting Started
 
 ### Prerequisites
