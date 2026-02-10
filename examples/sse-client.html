@@ -145,7 +145,7 @@
             }
             
             try {
-                eventSource = new EventSource('http://localhost:8080/sse');
+                eventSource = new EventSource('http://localhost:8000/sse');
                 
                 eventSource.onopen = (event) => {
                     logEvent('Connection established');

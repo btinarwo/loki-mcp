@@ -1,88 +1,102 @@
 package main
 
 import (
-	"bufio"
+	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/ThinkInAIXYZ/go-mcp/client"
+	"github.com/ThinkInAIXYZ/go-mcp/protocol"
+	"github.com/ThinkInAIXYZ/go-mcp/transport"
 )
 
-// Request represents a JSON-RPC request
-type Request struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      string `json:"id"`
-	Method  string `json:"method"`
-	Params  any    `json:"params"`
+// Config holds the client configuration
+type Config struct {
+	ServerURL string
+	Timeout   time.Duration
 }
 
-// Response represents a JSON-RPC response
-type Response struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      string          `json:"id"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *ErrorObject    `json:"error,omitempty"`
+// LoadConfig loads configuration from environment variables and command-line flags
+func LoadConfig() *Config {
+	return LoadConfigWithArgs(os.Args[1:])
 }
 
-// ErrorObject represents a JSON-RPC error object
-type ErrorObject struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
+// LoadConfigWithArgs loads configuration from environment variables and provided arguments
+// This function is useful for testing
+func LoadConfigWithArgs(args []string) *Config {
+	// Create a new flag set for parsing
+	fs := flag.NewFlagSet("client", flag.ContinueOnError)
+	serverURL := fs.String("server-url", "", "Server URL (overrides MCP_SERVER_URL environment variable)")
 
-// ToolResult represents the result of a call_tool request
-type ToolResult struct {
-	Content []ContentItem `json:"content"`
-	IsError bool          `json:"isError"`
-}
+	// Parse the provided arguments
+	fs.Parse(args)
 
-// ContentItem represents a content item in a tool result
-type ContentItem struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	// Default values
+	cfg := &Config{
+		ServerURL: "http://localhost:8000/mcp",
+		Timeout:   30 * time.Second,
+	}
+
+	// Check environment variable for server URL
+	if envURL := os.Getenv("MCP_SERVER_URL"); envURL != "" {
+		cfg.ServerURL = envURL
+	}
+
+	// Command-line flag takes precedence
+	if *serverURL != "" {
+		cfg.ServerURL = *serverURL
+	}
+
+	// Check environment variable for timeout
+	if envTimeout := os.Getenv("LOKI_QUERY_TIMEOUT"); envTimeout != "" {
+		if timeoutSecs, err := strconv.Atoi(envTimeout); err == nil && timeoutSecs > 0 {
+			cfg.Timeout = time.Duration(timeoutSecs) * time.Second
+		}
+	}
+
+	return cfg
 }
 
 func main() {
-	if len(os.Args) < 2 {
+	// Load configuration
+	cfg := LoadConfig()
+
+	// Parse remaining arguments (after flags)
+	fs := flag.NewFlagSet("client", flag.ContinueOnError)
+	fs.String("server-url", "", "Server URL (overrides MCP_SERVER_URL environment variable)")
+	fs.Parse(os.Args[1:])
+	args := fs.Args()
+
+	if len(args) < 1 {
 		showUsage()
 		os.Exit(1)
 	}
 
-	// Start the MCP server in a separate process
-	cmd := exec.Command("go", "run", "./cmd/server/main.go")
-
-	// Connect stdin and stdout to the MCP server
-	stdin, err := cmd.StdinPipe()
+	// Create transport client
+	transportClient, err := transport.NewStreamableHTTPClientTransport(cfg.ServerURL)
 	if err != nil {
-		log.Fatalf("Failed to get stdin pipe: %v", err)
+		log.Fatalf("Failed to create transport client: %v", err)
 	}
 
-	stdout, err := cmd.StdoutPipe()
+	// Initialize MCP client
+	mcpClient, err := client.NewClient(transportClient)
 	if err != nil {
-		log.Fatalf("Failed to get stdout pipe: %v", err)
+		log.Fatalf("Failed to create MCP client: %v", err)
 	}
+	defer mcpClient.Close()
 
-	// Set up stderr to be displayed
-	cmd.Stderr = os.Stderr
-
-	// Start the server
-	if err := cmd.Start(); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
-	}
-
-	// Create a reader for the stdout
-	reader := bufio.NewReader(stdout)
-
-	var req Request
+	ctx := context.Background()
 
 	// Process commands
-	switch os.Args[1] {
+	switch args[0] {
 	case "loki_query":
-		if len(os.Args) < 3 {
+		if len(args) < 2 {
 			fmt.Println("Usage: client loki_query [url] <query> [start] [end] [limit]")
 			fmt.Println("Examples:")
 			fmt.Println("  client loki_query \"{job=\\\"varlogs\\\"}\"")
@@ -93,124 +107,201 @@ func main() {
 
 		var lokiURL, query, start, end, org string
 		var limit float64
+
 		// Check if the first argument is a URL or a query
-		if strings.HasPrefix(os.Args[2], "http") {
+		if strings.HasPrefix(args[1], "http") {
 			// First arg is URL, second is query
-			if len(os.Args) < 4 {
+			if len(args) < 3 {
 				fmt.Println("Error: When providing a URL, you must also provide a query")
 				os.Exit(1)
 			}
-			lokiURL = os.Args[2]
-			query = os.Args[3]
-			argOffset := 4
+			lokiURL = args[1]
+			query = args[2]
+			argOffset := 3
 
 			// Optional parameters with URL
-			if len(os.Args) > argOffset {
-				start = os.Args[argOffset]
+			if len(args) > argOffset {
+				start = args[argOffset]
 			}
 
-			if len(os.Args) > argOffset+1 {
-				end = os.Args[argOffset+1]
+			if len(args) > argOffset+1 {
+				end = args[argOffset+1]
 			}
 
-			if len(os.Args) > argOffset+2 {
-				limitVal, err := strconv.ParseFloat(os.Args[argOffset+2], 64)
+			if len(args) > argOffset+2 {
+				limitVal, err := strconv.ParseFloat(args[argOffset+2], 64)
 				if err != nil {
 					log.Fatalf("Invalid number for limit: %v", err)
 				}
 				limit = limitVal
 			}
 
-			if len(os.Args) > argOffset+3 {
-				org = os.Args[argOffset+3]
+			if len(args) > argOffset+3 {
+				org = args[argOffset+3]
 			}
 		} else {
 			// First arg is the query (URL comes from environment)
-			query = os.Args[2]
-			argOffset := 3
+			query = args[1]
+			argOffset := 2
 
 			// Optional parameters without URL
-			if len(os.Args) > argOffset {
-				start = os.Args[argOffset]
+			if len(args) > argOffset {
+				start = args[argOffset]
 			}
 
-			if len(os.Args) > argOffset+1 {
-				end = os.Args[argOffset+1]
+			if len(args) > argOffset+1 {
+				end = args[argOffset+1]
 			}
 
-			if len(os.Args) > argOffset+2 {
-				limitVal, err := strconv.ParseFloat(os.Args[argOffset+2], 64)
+			if len(args) > argOffset+2 {
+				limitVal, err := strconv.ParseFloat(args[argOffset+2], 64)
 				if err != nil {
 					log.Fatalf("Invalid number for limit: %v", err)
 				}
 				limit = limitVal
 			}
 
-			if len(os.Args) > argOffset+3 {
-				org = os.Args[argOffset+3]
+			if len(args) > argOffset+3 {
+				org = args[argOffset+3]
 			}
 		}
 
-		// Create the Loki query request
-		req = createLokiQueryRequest(lokiURL, query, start, end, limit, org)
+		// Create arguments map
+		toolArgs := map[string]interface{}{
+			"query": query,
+		}
+
+		// Add URL parameter if provided
+		if lokiURL != "" {
+			toolArgs["url"] = lokiURL
+		}
+
+		// Add optional parameters if provided
+		if start != "" {
+			toolArgs["start"] = start
+		}
+
+		if end != "" {
+			toolArgs["end"] = end
+		}
+
+		if limit > 0 {
+			toolArgs["limit"] = limit
+		}
+
+		if org != "" {
+			toolArgs["org"] = org
+		}
+
+		// Marshal arguments to JSON
+		argsJSON, err := json.Marshal(toolArgs)
+		if err != nil {
+			log.Fatalf("Failed to marshal arguments: %v", err)
+		}
+
+		// Call the tool
+		result, err := mcpClient.CallTool(ctx, &protocol.CallToolRequest{
+			Name:         "loki_query",
+			RawArguments: argsJSON,
+		})
+		if err != nil {
+			log.Fatalf("Failed to call tool: %v", err)
+		}
+
+		// Print the result
+		for _, content := range result.Content {
+			if textContent, ok := content.(*protocol.TextContent); ok {
+				fmt.Println(textContent.Text)
+			}
+		}
+
+	case "loki_label_names":
+		// Create arguments map
+		toolArgs := map[string]interface{}{}
+
+		// Check for optional URL parameter
+		if len(args) > 1 && strings.HasPrefix(args[1], "http") {
+			toolArgs["url"] = args[1]
+		}
+
+		// Marshal arguments to JSON
+		argsJSON, err := json.Marshal(toolArgs)
+		if err != nil {
+			log.Fatalf("Failed to marshal arguments: %v", err)
+		}
+
+		// Call the tool
+		result, err := mcpClient.CallTool(ctx, &protocol.CallToolRequest{
+			Name:         "loki_label_names",
+			RawArguments: argsJSON,
+		})
+		if err != nil {
+			log.Fatalf("Failed to call tool: %v", err)
+		}
+
+		// Print the result
+		for _, content := range result.Content {
+			if textContent, ok := content.(*protocol.TextContent); ok {
+				fmt.Println(textContent.Text)
+			}
+		}
+
+	case "loki_label_values":
+		if len(args) < 2 {
+			fmt.Println("Usage: client loki_label_values <label> [url]")
+			fmt.Println("Examples:")
+			fmt.Println("  client loki_label_values job")
+			fmt.Println("  client loki_label_values job http://localhost:3100")
+			os.Exit(1)
+		}
+
+		// Create arguments map
+		toolArgs := map[string]interface{}{
+			"label": args[1],
+		}
+
+		// Check for optional URL parameter
+		if len(args) > 2 && strings.HasPrefix(args[2], "http") {
+			toolArgs["url"] = args[2]
+		}
+
+		// Marshal arguments to JSON
+		argsJSON, err := json.Marshal(toolArgs)
+		if err != nil {
+			log.Fatalf("Failed to marshal arguments: %v", err)
+		}
+
+		// Call the tool
+		result, err := mcpClient.CallTool(ctx, &protocol.CallToolRequest{
+			Name:         "loki_label_values",
+			RawArguments: argsJSON,
+		})
+		if err != nil {
+			log.Fatalf("Failed to call tool: %v", err)
+		}
+
+		// Print the result
+		for _, content := range result.Content {
+			if textContent, ok := content.(*protocol.TextContent); ok {
+				fmt.Println(textContent.Text)
+			}
+		}
+
+	case "list_tools":
+		// Get available tools
+		tools, err := mcpClient.ListTools(ctx)
+		if err != nil {
+			log.Fatalf("Failed to list tools: %v", err)
+		}
+
+		fmt.Println("Available tools:")
+		for _, tool := range tools.Tools {
+			fmt.Printf("  - %s: %s\n", tool.Name, tool.Description)
+		}
 
 	default:
 		showUsage()
 		os.Exit(1)
-	}
-
-	// Marshal the request to JSON
-	reqJSON, err := json.Marshal(req)
-	if err != nil {
-		log.Fatalf("Failed to marshal request: %v", err)
-	}
-
-	fmt.Printf("Sending request: %s\n", string(reqJSON))
-
-	// Send the request to the server
-	_, err = stdin.Write(append(reqJSON, '\n'))
-	if err != nil {
-		log.Fatalf("Failed to send request: %v", err)
-	}
-
-	// Read the response from the server
-	respJSON, err := reader.ReadBytes('\n')
-	if err != nil && err != io.EOF {
-		log.Fatalf("Failed to read response: %v", err)
-	}
-
-	fmt.Printf("Received response: %s\n", string(respJSON))
-
-	// Unmarshal the response
-	var resp Response
-	if err := json.Unmarshal(respJSON, &resp); err != nil {
-		log.Fatalf("Failed to unmarshal response: %v", err)
-	}
-
-	// Check for errors
-	if resp.Error != nil {
-		log.Fatalf("Error from server: %s", resp.Error.Message)
-	}
-
-	// Unmarshal the result
-	var result ToolResult
-	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		log.Fatalf("Failed to unmarshal result: %v", err)
-	}
-
-	// Process the result
-	if result.IsError {
-		fmt.Printf("Error: %s\n", result.Content[0].Text)
-	} else {
-		// Display the result
-		for _, item := range result.Content {
-			fmt.Println(item.Text)
-		}
-	}
-
-	// Terminate the server
-	if err := cmd.Process.Kill(); err != nil {
-		log.Printf("Failed to kill server process: %v", err)
 	}
 }
 
@@ -222,43 +313,17 @@ func showUsage() {
 	fmt.Println("      client loki_query http://localhost:3100 \"{job=\\\"varlogs\\\"}\"")
 	fmt.Println("      client loki_query \"{job=\\\"varlogs\\\"}\" \"-1h\" \"now\" 100")
 	fmt.Println("      client loki_query \"{job=\\\"varlogs\\\"}\" \"-1h\" \"now\" 100 \"tenant-123\"")
-}
-
-func createLokiQueryRequest(url, query, start, end string, limit float64, org string) Request {
-	// Create arguments map
-	args := map[string]any{
-		"query": query,
-	}
-
-	// Add URL parameter if provided, otherwise, let the server use the environment variable
-	if url != "" {
-		args["url"] = url
-	}
-
-	// Add optional parameters if provided
-	if start != "" {
-		args["start"] = start
-	}
-
-	if end != "" {
-		args["end"] = end
-	}
-
-	if limit > 0 {
-		args["limit"] = limit
-	}
-
-	if org != "" {
-		args["org"] = org
-	}
-
-	return Request{
-		JSONRPC: "2.0",
-		ID:      "1",
-		Method:  "tools/call",
-		Params: map[string]any{
-			"name":      "loki_query",
-			"arguments": args,
-		},
-	}
+	fmt.Println()
+	fmt.Println("  client loki_label_names [url]")
+	fmt.Println("    Examples:")
+	fmt.Println("      client loki_label_names")
+	fmt.Println("      client loki_label_names http://localhost:3100")
+	fmt.Println()
+	fmt.Println("  client loki_label_values <label> [url]")
+	fmt.Println("    Examples:")
+	fmt.Println("      client loki_label_values job")
+	fmt.Println("      client loki_label_values job http://localhost:3100")
+	fmt.Println()
+	fmt.Println("  client list_tools")
+	fmt.Println("    List all available tools")
 }

@@ -35,3 +35,6 @@ Thumbs.db
 # Binary output
 /loki-mcp-server
 /loki-mcp-client
+
+# Personal testing files (not shared with clients)
+.personal-testing/

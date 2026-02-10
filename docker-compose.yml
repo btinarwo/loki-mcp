@@ -1,17 +1,18 @@
 services:
   loki-mcp-server:
+    # Build from local Dockerfile
     build:
       context: .
       dockerfile: Dockerfile
-    image: loki-mcp-server:latest
     container_name: loki-mcp-server
     # Expose unified MCP server port
     ports:
-      - "8080:8080"
-    # If you need to pass environment variables
+      - "8000:8000"
+    # Environment variables for Loki connection
     environment:
       - LOKI_URL=http://loki:3100
-      - PORT=8080
+      - PORT=8000
+      - HOST=0.0.0.0
     depends_on:
       loki:
         condition: service_healthy

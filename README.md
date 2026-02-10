@@ -1,16 +1,40 @@
-# Loki MCP Server
+# Loki MCP Server (AWS Bedrock AgentCore Edition)
 
 [![CI](https://github.com/scottlepp/loki-mcp/workflows/CI/badge.svg)](https://github.com/scottlepp/loki-mcp/actions/workflows/ci.yml)
 
-A Go-based server implementation for the Model Context Protocol (MCP) with Grafana Loki integration.
+A Go-based server implementation for the Model Context Protocol (MCP) with Grafana Loki integration, modified for AWS Bedrock AgentCore deployment.
+
+## ⚠️ Important Notice
+
+This is a **modified version** of the original [loki-mcp](https://github.com/scottlepp/loki-mcp) repository. Key differences:
+
+- **Original:** Uses stdin/stdout communication with `mark3labs/mcp-go` library
+- **This Version:** Uses HTTP-based communication with `ThinkInAIXYZ/go-mcp` library for AWS Bedrock AgentCore compatibility
+
+**📄 See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for complete deployment, configuration, and technical details.**
+
+### Quick Comparison
+
+| Feature | Original | This Version |
+|---------|----------|--------------|
+| Communication | stdin/stdout | HTTP (port 8000) |
+| MCP Library | mark3labs/mcp-go | ThinkInAIXYZ/go-mcp |
+| Endpoint | N/A | `/mcp` |
+| Session Management | Server-managed | Platform-managed (stateless) |
+| Claude Desktop | ✅ Supported | ❌ Not supported |
+| AWS Bedrock AgentCore | ❌ Not supported | ✅ Fully compliant |
+| Platform | Any | ARM64 optimized |
 
 ## Getting Started
 
 ### Prerequisites
 
 - Go 1.16 or higher
+- Docker (optional, for containerized deployment)
 
 ### Building and Running
+
+**Note:** This version runs as an HTTP server on port 8000, not via stdin/stdout.
 
 Build and run the server:
 
@@ -18,7 +42,7 @@ Build and run the server:
 # Build the server
 go build -o loki-mcp-server ./cmd/server
 
-# Run the server
+# Run the server (HTTP mode on port 8000)
 ./loki-mcp-server
 ```
 
@@ -28,7 +52,13 @@ Or run directly with Go:
 go run ./cmd/server
 ```
 
-The server communicates using stdin/stdout and SSE following the Model Context Protocol (MCP). This makes it suitable for use with Claude Desktop and other MCP-compatible clients.
+The server will start an HTTP server on port 8000 (configurable via `PORT` environment variable) and expose the MCP endpoint at `/mcp`. This makes it suitable for use with AWS Bedrock AgentCore and other HTTP-based MCP clients.
+
+**Default Configuration:**
+- Host: `0.0.0.0` (all interfaces, configurable via `HOST` env var)
+- Port: `8000` (configurable via `PORT` env var)
+- Endpoint: `/mcp`
+- Transport: Stateless HTTP
 
 ## Project Structure
 
@@ -77,17 +107,50 @@ The Loki query tool supports the following environment variables:
 
 ### Testing the MCP Server
 
-You can test the MCP server using the provided client:
+You can test the MCP server using the provided HTTP-based client. The client connects to a running MCP server via HTTP instead of spawning it as a subprocess.
+
+#### Starting the Server
+
+First, start the MCP server separately:
+
+```bash
+# Build and run the server
+go build -o loki-mcp-server ./cmd/server
+./loki-mcp-server
+
+# Or run directly with Go
+go run ./cmd/server
+
+# Or use Docker
+docker-compose up -d
+```
+
+The server will start on port 8000 by default and expose the MCP endpoint at `http://localhost:8000/mcp`.
+
+#### Using the Client
+
+Build and run the client to query the running server:
 
 ```bash
 # Build the client
 go build -o loki-mcp-client ./cmd/client
 
-# Loki query examples:
+# Basic Loki query examples (connects to default http://localhost:8000/mcp):
 ./loki-mcp-client loki_query "{job=\"varlogs\"}"
 ./loki-mcp-client loki_query "{job=\"varlogs\"}" "-1h" "now" 100
 
-# Using environment variables:
+# Using a custom server URL via environment variable:
+export MCP_SERVER_URL="http://localhost:8000/mcp"
+./loki-mcp-client loki_query "{job=\"varlogs\"}"
+
+# Using a custom server URL via command-line flag (overrides environment variable):
+./loki-mcp-client --server-url http://localhost:8000/mcp loki_query "{job=\"varlogs\"}"
+
+# Configuring request timeout (default: 30 seconds):
+export LOKI_QUERY_TIMEOUT=60  # Set timeout to 60 seconds
+./loki-mcp-client loki_query "{job=\"varlogs\"}"
+
+# Using environment variables for Loki configuration:
 export LOKI_URL="http://localhost:3100"
 ./loki-mcp-client loki_query "{job=\"varlogs\"}"
 
@@ -108,6 +171,8 @@ export LOKI_TOKEN="your-bearer-token"
 ./loki-mcp-client loki_query "{job=\"varlogs\"}"
 
 # Using all environment variables together:
+export MCP_SERVER_URL="http://localhost:8000/mcp"
+export LOKI_QUERY_TIMEOUT=60
 export LOKI_URL="http://localhost:3100"
 export LOKI_ORG_ID="tenant-123"
 export LOKI_USERNAME="admin"
@@ -118,19 +183,64 @@ export LOKI_PASSWORD="password"
 ./loki-mcp-client loki_query "{job=\"varlogs\"}" "" "" "" "" "" "tenant-123"
 ```
 
+#### Client Configuration
+
+The client supports the following configuration options:
+
+- **MCP_SERVER_URL**: Environment variable to set the MCP server URL (default: `http://localhost:8000/mcp`)
+- **--server-url**: Command-line flag to set the MCP server URL (overrides environment variable)
+- **LOKI_QUERY_TIMEOUT**: Environment variable to set the HTTP request timeout in seconds (default: 30)
+
+**Configuration Priority** (highest to lowest):
+1. Command-line flag `--server-url`
+2. Environment variable `MCP_SERVER_URL`
+3. Default value `http://localhost:8000/mcp`
+
+#### Error Handling
+
+The client provides clear error messages for common issues:
+
+- **Server not running**: "Failed to connect to server at {url}: connection refused"
+- **Request timeout**: "Request timed out after {timeout} seconds"
+- **HTTP errors**: "Server returned error: {status_code} {status_text}"
+- **Invalid JSON**: "Failed to parse server response: invalid JSON"
+- **JSON-RPC errors**: "Error from server: {error_message}"
+
 ## Docker Support
 
-You can build and run the MCP server using Docker:
+The project includes two Dockerfiles for different use cases:
+
+### Dockerfile (Standard)
+- **Platform:** linux/amd64 (x86_64)
+- **Use Case:** Local testing, development
+- **Build:** Downloads dependencies during build
 
 ```bash
-# Build the Docker image
+# Build standard image
 docker build -t loki-mcp-server .
 
 # Run the server
-docker run --rm -i loki-mcp-server
+docker run -p 8000:8000 --rm loki-mcp-server
 ```
 
-Alternatively, you can use Docker Compose:
+### Dockerfile.ecr (AWS Optimized)
+- **Platform:** linux/arm64 (ARM64)
+- **Use Case:** AWS Bedrock AgentCore deployment
+- **Build:** Uses vendored dependencies (faster, more reliable)
+- **Size:** Minimal (~10-30 MB)
+- **Architecture:** Optimized for AWS Graviton processors
+
+```bash
+# Build ARM64 image
+docker build --platform linux/arm64 -f Dockerfile.ecr -t loki-mcp-server:latest .
+
+# Run locally (if on ARM64 machine)
+docker run -p 8000:8000 loki-mcp-server:latest
+```
+
+### Docker Compose
+
+For local testing with a complete Loki environment:
 
 ```bash
 # Build and run with Docker Compose
@@ -181,204 +291,106 @@ The project includes a complete Docker Compose setup to test Loki queries locall
 
 4. Access the Grafana UI at http://localhost:3000 to explore logs visually.
 
-## Server-Sent Events (SSE) Support
+## ⚠️ Claude Desktop Compatibility
 
-The server now supports two modes of communication:
-1. Standard input/output (stdin/stdout) following the Model Context Protocol (MCP)
-2. HTTP Server with Server-Sent Events (SSE) endpoint for integration with tools like n8n
+**This modified version is NOT compatible with Claude Desktop** because it uses HTTP-based communication instead of stdin/stdout.
 
-The default port for the HTTP server is 8080, but can be configured using the `SSE_PORT` environment variable.
+If you need Claude Desktop support, please use the [original repository](https://github.com/scottlepp/loki-mcp) which uses stdin/stdout communication.
 
-### Server Endpoints
+### Why Not Compatible?
 
-When running in HTTP mode, the server exposes the following endpoints:
+Claude Desktop expects MCP servers to:
+1. Communicate via stdin/stdout
+2. Be spawned as subprocesses
+3. Use the `mark3labs/mcp-go` library
 
-- SSE Endpoint: `http://localhost:8080/sse` - For real-time event streaming
-- MCP Endpoint: `http://localhost:8080/mcp` - For MCP protocol messaging
+This modified version:
+1. Communicates via HTTP on port 8000
+2. Runs as a standalone HTTP server
+3. Uses the `ThinkInAIXYZ/go-mcp` library for Bedrock AgentCore compatibility
 
-### Using Docker with SSE
+## AWS Bedrock AgentCore Deployment
 
-When running the server with Docker, make sure to expose port 8080:
+This version is specifically designed for AWS Bedrock AgentCore. To deploy:
+
+### 1. Build and Push Container
 
 ```bash
-# Build the Docker image
-docker build -t loki-mcp-server .
+# Build ARM64 image
+docker build --platform linux/arm64 -f Dockerfile.ecr -t loki-mcp-server:latest .
 
-# Run the server with port mapping
-docker run -p 8080:8080 --rm -i loki-mcp-server
+# Tag and push to your container registry
+docker tag loki-mcp-server:latest your-registry/loki-mcp-server:latest
+docker push your-registry/loki-mcp-server:latest
 ```
 
-### n8n Integration
+### 2. Create Bedrock AgentCore Agent
 
-You can integrate the Loki MCP Server with n8n workflows:
+```bash
+aws bedrock-agentcore create-agent \
+    --agent-name loki-query-agent \
+    --runtime-config '{
+      "type": "MCP_SERVER",
+      "containerImage": "your-registry/loki-mcp-server:latest",
+      "port": 8000,
+      "endpointPath": "/mcp",
+      "environmentVariables": {
+        "LOKI_URL": "http://your-loki-server:3100"
+      }
+    }' \
+    --region us-east-1
+```
 
-1. Install the MCP Client Tools node in n8n
+### 3. Test the Agent
 
-2. Configure the node with these parameters:
-   - **SSE Endpoint**: `http://your-server-address:8080/sse` (replace with your actual server address)
-   - **Authentication**: Choose appropriate authentication if needed
-   - **Tools to Include**: Choose which Loki tools to expose to the AI Agent
-
-3. Connect the MCP Client Tool node to an AI Agent node that will use the Loki querying capabilities
-
-Example workflow:
-Trigger → MCP Client Tool (Loki server) → AI Agent (Claude)
+```bash
+aws bedrock-agentcore invoke-agent \
+    --agent-id YOUR_AGENT_ID \
+    --session-id test-$(date +%s) \
+    --input-text "Show me the last 10 logs from the production job" \
+    --region us-east-1
+```
 
 ## Architecture
 
 The Loki MCP Server uses a modular architecture:
 
 - **Server**: The main MCP server implementation in `cmd/server/main.go`
-- **Client**: A test client in `cmd/client/main.go` for interacting with the MCP server
+  - HTTP server on port 8000
+  - Stateless transport mode
+  - Platform-managed sessions
+- **Client**: A test client in `cmd/client/main.go` for interacting with the MCP server via HTTP
 - **Handlers**: Individual tool handlers in `internal/handlers/`
-  - `loki.go`: Grafana Loki query functionality
+  - `loki.go`: Grafana Loki query utilities
+  - `loki_protocol.go`: Protocol-based tool handlers for MCP
 
-## Using with Claude Desktop
+## Key Technical Details
 
-You can use this MCP server with Claude Desktop to add Loki query tools. Follow these steps:
+### Session Management
 
-### Option 1: Using the Compiled Binary
+This implementation uses **platform-managed sessions** (stateless mode):
+- The server accepts any session ID without validation
+- AWS Bedrock AgentCore manages sessions at the platform level
+- No server-side session store required
 
-1. Build the server:
-```bash
-go build -o loki-mcp-server ./cmd/server
-```
+### Transport
 
-2. Add the configuration to your Claude Desktop configuration file using `claude_desktop_config_binary.json`.
+- **Protocol**: HTTP with JSON-RPC 2.0
+- **Endpoint**: `/mcp`
+- **Port**: 8000 (configurable via `PORT` env var)
+- **Host**: 0.0.0.0 (configurable via `HOST` env var)
+- **Mode**: Stateless
 
-### Option 2: Using Go Run with a Shell Script
+### MCP Library
 
-1. Make the script executable:
-```bash
-chmod +x run-mcp-server.sh
-```
+Uses `github.com/ThinkInAIXYZ/go-mcp v0.2.24` which provides:
+- Stateless transport support
+- Platform-managed session compatibility
+- Bedrock AgentCore compliance
 
-2. Add the configuration to your Claude Desktop configuration file using `claude_desktop_config_script.json`.
+## Documentation
 
-### Option 3: Using Docker (Recommended)
-
-1. Build the Docker image:
-```bash
-docker build -t loki-mcp-server .
-```
-
-2. Add the configuration to your Claude Desktop configuration file using `claude_desktop_config_docker.json`.
-
-### Configuration Details
-
-The Claude Desktop configuration file is located at:
-- On macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- On Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-- On Linux: `~/.config/Claude/claude_desktop_config.json`
-
-You can use one of the example configurations provided in this repository:
-- `claude_desktop_config.json`: Generic template
-- `claude_desktop_config_example.json`: Example using `go run` with the current path
-- `claude_desktop_config_binary.json`: Example using the compiled binary
-- `claude_desktop_config_script.json`: Example using a shell script (recommended for `go run`)
-- `claude_desktop_config_docker.json`: Example using Docker (most reliable)
-
-**Notes**:
-- When using `go run` with Claude Desktop, you may need to set several environment variables in both the script and the configuration file:
-  - `HOME`: The user's home directory
-  - `GOPATH`: The Go workspace directory
-  - `GOMODCACHE`: The Go module cache directory
-  - `GOCACHE`: The Go build cache directory
-  
-  These are required to ensure Go can find its modules and build cache when run from Claude Desktop.
-
-- Using Docker is the most reliable approach as it packages all dependencies and environment variables in a container.
-
-Or create your own configuration:
-
-```json
-{
-  "mcpServers": {
-    "lokiserver": {
-      "command": "path/to/loki-mcp-server",
-      "args": [],
-      "env": {
-        "LOKI_URL": "http://localhost:3100",
-        "LOKI_ORG_ID": "your-default-org-id",
-        "LOKI_USERNAME": "your-username",
-        "LOKI_PASSWORD": "your-password",
-        "LOKI_TOKEN": "your-bearer-token"
-      },
-      "disabled": false,
-      "autoApprove": ["loki_query"]
-    }
-  }
-}
-```
-
-Make sure to replace `path/to/loki-mcp-server` with the absolute path to the built binary or source code.
-
-4. Restart Claude Desktop.
-
-5. You can now use the tools in Claude:
-   - Loki query examples:
-     - "Query Loki for logs with the query {job=\"varlogs\"}"
-     - "Find error logs from the last hour in Loki using query {job=\"varlogs\"} |= \"ERROR\""
-     - "Show me the most recent 50 logs from Loki with job=varlogs"
-     - "Query Loki for logs with org 'tenant-123' using query {job=\"varlogs\"}"
-
-### Using Organization ID in Natural Language Prompts
-
-When using this MCP server with Claude Desktop or other AI assistants, users can naturally mention the organization ID in their prompts in several ways:
-
-#### Direct Organization Reference
-- **"Query Loki for logs from organization 'tenant-123' with the query {job=\"varlogs\"}"**
-- **"Search Loki logs for org 'production-env' using {job=\"web\"}"**
-- **"Get logs from organization ID 'client-abc' matching {service=\"api\"}"**
-
-#### Contextual Organization Mentions
-- **"Check the error logs for our production tenant (org: prod-001) using query {level=\"error\"}"**
-- **"Find all logs from customer organization 'customer-xyz' for the last hour"**
-- **"Query Loki with org tenant-456 to find logs matching {job=\"backend\"}"**
-
-#### Multi-tenant Scenarios
-- **"Switch to organization 'dev-team' and query {job=\"logs\"} for debugging"**
-- **"Use org 'staging-env' to search for warning logs in the last 2 hours"**
-- **"Search logs in tenant 'qa-environment' for any error messages"**
-
-#### Combined with Other Parameters
-- **"Query Loki for organization 'prod-cluster' from 2 hours ago to now with limit 50"**
-- **"Get the last 100 logs from org 'microservice-team' for query {app=\"payment\"}"**
-
-When you mention any of these natural language prompts, the AI assistant will automatically map terms like "organization", "org", "tenant", or "organization ID" to the `org` parameter in the Loki query tool, which gets sent as the `X-Scope-OrgID` header to your Loki server for proper multi-tenant filtering.
-
-The key is to naturally mention any specific parameters in your request - the AI will understand how to map them to the appropriate Loki query tool parameters. When parameters are not explicitly mentioned, the system will automatically use defaults from environment variables:
-- `LOKI_URL` for the Loki server URL
-- `LOKI_ORG_ID` for the organization ID  
-- `LOKI_USERNAME` and `LOKI_PASSWORD` for basic authentication
-- `LOKI_TOKEN` for bearer token authentication
-
-This makes it very convenient to set up default connection parameters once and then use natural language queries without having to specify authentication details every time.
-
-## Using with Cursor
-
-You can also integrate the Loki MCP server with the Cursor editor. To do this, add the following configuration to your Cursor settings:
-
-Docker configuration:
-
-```json
-{
-  "mcpServers": {
-    "loki-mcp-server": {
-      "command": "docker",
-      "args": ["run", "--rm", "-i", 
-               "-e", "LOKI_URL=http://host.docker.internal:3100", 
-               "-e", "LOKI_ORG_ID=your-default-org-id",
-               "-e", "LOKI_USERNAME=your-username",
-               "-e", "LOKI_PASSWORD=your-password",
-               "-e", "LOKI_TOKEN=your-bearer-token",
-               "loki-mcp-server:latest"]
-    }
-  }
-}
-```
-
-After adding this configuration, restart Cursor, and you'll be able to use the Loki query tool directly within the editor.
+- **[DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)** - Complete deployment, configuration, network setup, testing, and troubleshooting guide
 
 ## License
 

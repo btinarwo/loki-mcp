@@ -1,4 +1,5 @@
-FROM golang:1.24-alpine AS builder
+# Build stage - use ARM64 platform for AWS Bedrock AgentCore compatibility
+FROM --platform=linux/arm64 golang:1.24-alpine AS builder
 
 WORKDIR /app
 
@@ -11,11 +12,11 @@ RUN go mod download
 # Copy the source code
 COPY . .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -o loki-mcp-server ./cmd/server
+# Build the application for ARM64 architecture (required by AWS Bedrock AgentCore)
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o loki-mcp-server ./cmd/server
 
-# Use a smaller image for the final stage
-FROM alpine:latest
+# Runtime stage - use ARM64 platform for AWS Bedrock AgentCore compatibility
+FROM --platform=linux/arm64 alpine:latest
 
 WORKDIR /app
 
@@ -23,7 +24,7 @@ WORKDIR /app
 COPY --from=builder /app/loki-mcp-server .
 
 # Expose port for unified MCP server (both SSE and Streamable HTTP)
-EXPOSE 8080
+EXPOSE 8000
 
 # Set the entry point
 ENTRYPOINT ["./loki-mcp-server"]
